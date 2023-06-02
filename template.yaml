@@ -1,0 +1,465 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Metadata:
+
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Deployment
+        Parameters:
+          - Vpc
+          - PublicSubnets
+          - PrivateSubnets
+          - ClusterName
+      - Label:
+          default: Configuration
+        Parameters:
+          - DomainName
+          - EmailFrom
+          - CertificateArn
+    ParameterLabels:
+      Vpc:
+        default: Vpc
+      PublicSubnets:
+        default: Public Subnets
+      PrivateSubnets:
+        default: Private Subnets
+      ClusterName:
+        default: ECS Cluster Name
+      DomainName:
+        default: Domain Name
+      EmailFrom:
+        default: Email From Address
+      CertificateArn:
+        default: SSL Certificate Arn
+
+Parameters:
+
+  Vpc:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC to use.
+
+  PublicSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The Public Subnets for the Load Balancer.
+
+  PrivateSubnets:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The Private Subnets for the ECS task and EFS
+
+  ClusterName:
+    Type: String
+    Description: The name of an existing ECS cluster.
+
+  DomainName:
+    Type: String
+    Description: The domain url to be used to access VaultWarden.
+    AllowedPattern: '^[a-z0-9\-\.]+[^\.]$'
+    ConstraintDescription: 'Must be a valid domain name string and also must NOT end in a full stop.'
+    Default: vaultwarden.example.com
+
+  EmailFrom:
+    Type: String
+    Description: The email address for VaultWarden to send from.
+    AllowedPattern: '^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$'
+    ConstraintDescription: 'Must be a valid email address'
+    Default: vaultwarden@example.com
+
+  CertificateArn:
+    Type: String
+    Description: The Arn for the ACM certificate for the supplied Dns Name.
+
+Resources:
+
+  UtilityFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: VPC not required.
+          - id: W92
+            reason: ReservedConcurrentExecutions not required.
+    Properties:
+      Runtime: python3.10
+      Handler: app.handler
+      MemorySize: 128
+      Timeout: 3
+      CodeUri: functions/utility-function
+
+  SmtpUser:
+    Type: AWS::IAM::User
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F10
+            reason: Single use policy.
+          - id: F2000
+            reason: Single user no groups required.
+    Properties:
+      Policies:
+        - PolicyName: SesPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: ses:SendRawEmail
+                Resource: '*'
+
+  SmtpAccessKey:
+    Type: AWS::IAM::AccessKey
+    Properties:
+      UserName: !Ref SmtpUser
+
+  Secrets:
+    Type: Custom::Utility
+    Properties:
+      ServiceToken: !GetAtt UtilityFunction.Arn
+      SecretAccessKey: !GetAtt SmtpAccessKey.SecretAccessKey
+      Token: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
+
+  SmtpSecret:
+    Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W77
+            reason: Custom KMS Key not required.
+    Properties:
+      Description: This secret holds the SMTP credentials for SES.
+      SecretString: !Sub '{"username": "${SmtpAccessKey}", "password": "${Secrets.SmtpPassword}"}'
+
+  SecurityGroupAlb:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the load balancer
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: http access
+          CidrIp: 0.0.0.0/0
+          FromPort: 443
+          ToPort: 443
+          IpProtocol: tcp
+      SecurityGroupEgress:
+        - Description: Outbound to ECS
+          DestinationSecurityGroupId: !Ref SecurityGroupEcs
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W2
+            reason: All https traffic allowed.
+          - id: W9
+            reason: All https traffic allowed.
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: ipv4
+      Subnets: !Ref PublicSubnets
+      SecurityGroups:
+        - !Ref SecurityGroupAlb
+      LoadBalancerAttributes:
+        - Key: idle_timeout.timeout_seconds
+          Value: '30'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W52
+            reason: Access logging not required.
+
+  Listener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      Certificates:
+        - CertificateArn: !Ref CertificateArn
+      SslPolicy: ELBSecurityPolicy-TLS13-1-0-2021-06
+      DefaultActions:
+        - Order: 10
+          Type: forward
+          TargetGroupArn: !Ref TargetGroup
+
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    DependsOn: LoadBalancer
+    Properties:
+      Protocol: HTTP
+      Port: 80
+      TargetType: ip
+      VpcId: !Ref Vpc
+      TargetGroupAttributes:
+        - Key: deregistration_delay.timeout_seconds
+          Value: '5'
+      HealthCheckProtocol: HTTP
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      HealthCheckTimeoutSeconds: 2
+      HealthCheckIntervalSeconds: 5
+      Matcher:
+        HttpCode: '200'
+
+  EcsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: The ECS Execution IAM Role
+      AssumeRolePolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+      Policies:
+        - PolicyName: CreateLogGroup
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: logs:CreateLogGroup
+                Resource: !Sub 'arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:*'
+        - PolicyName: GetSecretValues
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref SmtpSecret
+
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Cpu: '1024'
+      Memory: '2048'
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      ExecutionRoleArn: !GetAtt EcsExecutionRole.Arn
+      TaskRoleArn: !GetAtt EcsTaskRole.Arn
+      ContainerDefinitions:
+        - Name: vaultwarden
+          Image: vaultwarden/server:latest
+          Environment:
+            - Name: ADMIN_TOKEN
+              Value: !GetAtt Secrets.AdminToken
+            - Name: SMTP_HOST
+              Value: !Sub email-smtp.${AWS::Region}.amazonaws.com
+            - Name: SMTP_FROM
+              Value: !Ref EmailFrom
+            - Name: SMTP_PORT
+              Value: '587'
+            - Name: SMTP_SSL
+              Value: 'true'
+            - Name: DOMAIN
+              Value: !Sub https://${DomainName}
+            - Name: AWS_ACCOUNT_ID
+              Value: !Ref AWS::AccountId
+            - Name: AWS_REGION
+              Value: !Ref AWS::Region
+          Secrets:
+            - Name: SMTP_USERNAME
+              ValueFrom: !Sub '${SmtpSecret}:username::'
+            - Name: SMTP_PASSWORD
+              ValueFrom: !Sub '${SmtpSecret}:password::'
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-create-group: true
+              awslogs-group: /ecs/vaultwarden
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: external
+          LinuxParameters:
+            InitProcessEnabled: True
+          Essential: True
+          MountPoints:
+            - SourceVolume: efs-vaultwarden
+              ContainerPath: /data
+              ReadOnly: False
+      Volumes:
+        - Name: efs-vaultwarden
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref FileSystem
+            RootDirectory: /
+            TransitEncryption: ENABLED
+            AuthorizationConfig:
+              IAM: ENABLED
+
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: Listener
+    Properties:
+      Cluster: !Ref ClusterName
+      TaskDefinition: !Ref EcsTaskDefinition
+      LoadBalancers:
+        - TargetGroupArn: !Ref TargetGroup
+          ContainerName: vaultwarden
+          ContainerPort: 80
+#      DesiredCount: 1
+      DesiredCount: 0
+      EnableExecuteCommand: True
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !Ref SecurityGroupEcs
+          Subnets: !Ref PrivateSubnets
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      DeploymentController:
+        Type: ECS
+      EnableECSManagedTags: True
+      Tags:
+        - Key: target-group-arn
+          Value: !Ref TargetGroup
+
+  SecurityGroupEcs:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the containers
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - Description: All outbound
+          CidrIp: 0.0.0.0/0
+          IpProtocol: '-1'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: All protocols desired for outbound traffic.
+          - id: W40
+            reason: All protocols desired for outbound traffic.
+
+  SecurityGroupEcsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroupEcs
+      Description: Inbound from ALB
+      SourceSecurityGroupId: !Ref SecurityGroupAlb
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+
+  SecurityGroupEfs:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to EFS
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: ECS EFS access
+          SourceSecurityGroupId: !Ref SecurityGroupEcs
+          FromPort: 2049
+          ToPort: 2049
+          IpProtocol: tcp
+      SecurityGroupEgress:
+        - Description: All outbound
+          CidrIp: 0.0.0.0/0
+          IpProtocol: '-1'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: All protocols desired for outbound traffic.
+          - id: W40
+            reason: All protocols desired for outbound traffic.
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BackupPolicy:
+        Status: DISABLED
+      Encrypted: FALSE
+      LifecyclePolicies:
+        - TransitionToIA: AFTER_14_DAYS
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F32
+            reason: Encryption not required.
+
+  MountTarget0:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [0, !Ref PrivateSubnets]
+      SecurityGroups:
+        - !Ref SecurityGroupEfs
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [1, !Ref PrivateSubnets]
+      SecurityGroups:
+        - !Ref SecurityGroupEfs
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [2, !Ref PrivateSubnets]
+      SecurityGroups:
+        - !Ref SecurityGroupEfs
+
+  EcsTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Description: The ECS Execution IAM Role
+      AssumeRolePolicyDocument:
+        Version: '2008-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: EFS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'elasticfilesystem:*'
+                Resource: !Sub 'arn:${AWS::Partition}:elasticfilesystem:${AWS::Region}:${AWS::AccountId}:file-system/${FileSystem}'
+        - PolicyName: SSM
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: '*'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F3
+            reason: Specific permision not possible.
+          - id: W11
+            reason: Resource level policy not possible.
