@@ -313,8 +313,7 @@ Resources:
         - TargetGroupArn: !Ref TargetGroup
           ContainerName: vaultwarden
           ContainerPort: 80
-#      DesiredCount: 1
-      DesiredCount: 0
+      DesiredCount: 1
       EnableExecuteCommand: True
       LaunchType: FARGATE
       NetworkConfiguration:
@@ -463,3 +462,11 @@ Resources:
             reason: Specific permision not possible.
           - id: W11
             reason: Resource level policy not possible.
+
+Outputs:
+
+  LoadBalancerDNSName:
+    Value: !GetAtt LoadBalancer.DNSName
+  
+  AdminToken:
+    Value: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
