@@ -4,46 +4,33 @@ This solution deploys the [VaultWarden](https://github.com/dani-garcia/vaultward
 
 ## Pre requisities
 
+- [AWS CLI](https://aws.amazon.com/cli/)
+- Python > 3.7
+- An AWS S3 bucket for the CloudFormation Assets to be uploaded to.
 - An AWS ACM Public SSL Certificate for the Domain to be used.
 - AWS SES configured to be able to send from one validated email address
-- [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
-- Docker Desktop (or Python 3.10 available locally)
 
 ## Deployment
 
 ```bash
-# If you have Docker Desktop
-sam build -u
-# If you have Python 3.10 running locally
-sam build
+pip install -r ./functions/utility-function/requirements.txt -t ./functions/utility-function/
+aws cloudformation package --template-file template.yaml --s3-bucket {YOUR S3 BUCKET} --output-template-file packaged-template.yaml
 ```
 
-```bash
-sam deploy --guided
-# Follow the prompts and supplied the requested values
-```
+> **Note**: Make sure to replace `{YOUR S3 BUCKET}` with the name of your own S3 bucket.
+
+You can then navigate to the AWS CloudFormation console in the same region and deploy a new stack by specifying the `packaged-template.yaml` file that was just created/
 
 ## Access
 
-Once the SAM CLI has completed the deployment you will see two outputs:
+Once the stack deployment is complete you will see two outputs:
 
-```txt
-----------------------------------------------------------------------------------------------
-Outputs
-----------------------------------------------------------------------------------------------
-Key                 LoadBalancerDNSName
-Description         -
-Value               xxxxxxxxxxxxxxxxxxxxxxxxx.elb.amazonaws.com
-
-Key                 AdminTokenSecretId
-Description         -
-Value               arn:aws:secretsmanager:XX-XXXX-X:XXXXXXXXXXXX:secret:AdminToken-XXXXXXXXXX
-----------------------------------------------------------------------------------------------
-```
+- LoadBalancerDNSName
+- AdminTokenSecretId
 
 Create a new CNAME entry in your DNS provider using the `LoadBalancerDNSName` value and the DomainName you chose.
 
-Once DNS has been propogated you should be able to access the Web Interface at:
+Once DNS has been propagated you should be able to access the Web Interface at:
 https://{DOMAINNAME}
 
 ### Admin Panel
