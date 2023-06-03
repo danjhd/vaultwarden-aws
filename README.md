@@ -53,6 +53,10 @@ Create a new CNAME entry in your DNS provider using the `LoadBalancerDNSName` va
 Once DNS has been propogated you should be able to access the Web Interface at:
 https://{DOMAINNAME}
 
-The Admin Panel of VaultWarden can be accessed at:
-https://{DOMAINNAME}/admin
-You will be asked for a Admin Token when accessing this URL and for that you should supply the value of the `AdminToken` output.
+### Admin Panel
+
+The Admin Panel of VaultWarden is blocked by the WAF deliberately.
+
+Access can be gained at `http://{ecs task private IP}/admin`
+
+> **Note**: To gain access you will need to do so from a resource that has private IP access and update the ECS security group.
