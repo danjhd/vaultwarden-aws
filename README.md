@@ -10,6 +10,7 @@ This solution deploys the [VaultWarden](https://github.com/dani-garcia/vaultward
   - 1 x ECS Cluster configured for Fargate
   - 1 x ACM Public SSL Certificate for the Domain to be used.
   - SES configured to be able to send from one validated email address
+  - 1 x S3 Bucket (for Load Balancer logs) - requires [S3 Bucket Policy](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/enable-access-logging.html) with prefix value of `vaultwarden-alb`
 
 - AWS CLI
 - AWS SAM CLI

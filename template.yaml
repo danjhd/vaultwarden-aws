@@ -20,6 +20,7 @@ Metadata:
           - DomainName
           - EmailFrom
           - CertificateArn
+          - AlbLogBucket
     ParameterLabels:
       Vpc:
         default: Vpc
@@ -35,6 +36,8 @@ Metadata:
         default: Email From Address
       CertificateArn:
         default: SSL Certificate Arn
+      AlbLogBucket:
+        default: Load Balancer Log Bucket
 
 Parameters:
 
@@ -72,6 +75,10 @@ Parameters:
     Type: String
     Description: The Arn for the ACM certificate for the supplied Dns Name.
 
+  AlbLogBucket:
+    Type: String
+    Description: The S3 Bucket to use for Load Balancer Access Logs.
+
 Resources:
 
   UtilityFunction:
@@ -96,7 +103,7 @@ Resources:
       cfn_nag:
         rules_to_suppress:
           - id: F10
-            reason: Single use policy.
+            reason: Single user policy.
           - id: F2000
             reason: Single user no groups required.
     Properties:
@@ -134,6 +141,23 @@ Resources:
       Description: This secret holds the SMTP credentials for SES.
       SecretString: !Sub '{"username": "${SmtpAccessKey}", "password": "${Secrets.SmtpPassword}"}'
 
+  SecurityGroupEcs:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to the containers
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - Description: All outbound
+          CidrIp: 0.0.0.0/0
+          IpProtocol: '-1'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: All protocols desired for outbound traffic.
+          - id: W40
+            reason: All protocols desired for outbound traffic.
+
   SecurityGroupAlb:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -159,6 +183,76 @@ Resources:
           - id: W9
             reason: All https traffic allowed.
 
+  SecurityGroupEcsIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroupEcs
+      Description: Inbound from ALB
+      SourceSecurityGroupId: !Ref SecurityGroupAlb
+      IpProtocol: tcp
+      FromPort: 80
+      ToPort: 80
+
+  SecurityGroupEfs:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to EFS
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - Description: ECS EFS access
+          SourceSecurityGroupId: !Ref SecurityGroupEcs
+          FromPort: 2049
+          ToPort: 2049
+          IpProtocol: tcp
+      SecurityGroupEgress:
+        - Description: All outbound
+          CidrIp: 0.0.0.0/0
+          IpProtocol: '-1'
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: All protocols desired for outbound traffic.
+          - id: W40
+            reason: All protocols desired for outbound traffic.
+
+  FileSystem:
+    Type: AWS::EFS::FileSystem
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BackupPolicy:
+        Status: ENABLED
+      Encrypted: TRUE
+      LifecyclePolicies:
+        - TransitionToIA: AFTER_14_DAYS
+      PerformanceMode: generalPurpose
+      ThroughputMode: bursting
+
+  MountTarget0:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [0, !Ref PrivateSubnets]
+      SecurityGroups:
+        - !Ref SecurityGroupEfs
+
+  MountTarget1:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [1, !Ref PrivateSubnets]
+      SecurityGroups:
+        - !Ref SecurityGroupEfs
+
+  MountTarget2:
+    Type: AWS::EFS::MountTarget
+    Properties:
+      FileSystemId: !Ref FileSystem
+      SubnetId: !Select [2, !Ref PrivateSubnets]
+      SecurityGroups:
+        - !Ref SecurityGroupEfs
+
   LoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
@@ -171,11 +265,12 @@ Resources:
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
           Value: '30'
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W52
-            reason: Access logging not required.
+        - Key: access_logs.s3.enabled
+          Value: True
+        - Key: access_logs.s3.bucket
+          Value: !Ref AlbLogBucket
+        - Key: access_logs.s3.prefix
+          Value: vaultwarden-alb
 
   Listener:
     Type: AWS::ElasticLoadBalancingV2::Listener
@@ -331,98 +426,6 @@ Resources:
       Tags:
         - Key: target-group-arn
           Value: !Ref TargetGroup
-
-  SecurityGroupEcs:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Access to the containers
-      VpcId: !Ref Vpc
-      SecurityGroupEgress:
-        - Description: All outbound
-          CidrIp: 0.0.0.0/0
-          IpProtocol: '-1'
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W5
-            reason: All protocols desired for outbound traffic.
-          - id: W40
-            reason: All protocols desired for outbound traffic.
-
-  SecurityGroupEcsIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !Ref SecurityGroupEcs
-      Description: Inbound from ALB
-      SourceSecurityGroupId: !Ref SecurityGroupAlb
-      IpProtocol: tcp
-      FromPort: 80
-      ToPort: 80
-
-  SecurityGroupEfs:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Access to EFS
-      VpcId: !Ref Vpc
-      SecurityGroupIngress:
-        - Description: ECS EFS access
-          SourceSecurityGroupId: !Ref SecurityGroupEcs
-          FromPort: 2049
-          ToPort: 2049
-          IpProtocol: tcp
-      SecurityGroupEgress:
-        - Description: All outbound
-          CidrIp: 0.0.0.0/0
-          IpProtocol: '-1'
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W5
-            reason: All protocols desired for outbound traffic.
-          - id: W40
-            reason: All protocols desired for outbound traffic.
-
-  FileSystem:
-    Type: AWS::EFS::FileSystem
-    UpdateReplacePolicy: Retain
-    DeletionPolicy: Retain
-    Properties:
-      BackupPolicy:
-        Status: DISABLED
-      Encrypted: FALSE
-      LifecyclePolicies:
-        - TransitionToIA: AFTER_14_DAYS
-      PerformanceMode: generalPurpose
-      ThroughputMode: bursting
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: F32
-            reason: Encryption not required.
-
-  MountTarget0:
-    Type: AWS::EFS::MountTarget
-    Properties:
-      FileSystemId: !Ref FileSystem
-      SubnetId: !Select [0, !Ref PrivateSubnets]
-      SecurityGroups:
-        - !Ref SecurityGroupEfs
-
-  MountTarget1:
-    Type: AWS::EFS::MountTarget
-    Properties:
-      FileSystemId: !Ref FileSystem
-      SubnetId: !Select [1, !Ref PrivateSubnets]
-      SecurityGroups:
-        - !Ref SecurityGroupEfs
-
-  MountTarget2:
-    Type: AWS::EFS::MountTarget
-    Properties:
-      FileSystemId: !Ref FileSystem
-      SubnetId: !Select [2, !Ref PrivateSubnets]
-      SecurityGroups:
-        - !Ref SecurityGroupEfs
 
   EcsTaskRole:
     Type: AWS::IAM::Role
