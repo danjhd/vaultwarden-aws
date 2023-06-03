@@ -4,12 +4,8 @@ This solution deploys the [VaultWarden](https://github.com/dani-garcia/vaultward
 
 ## Pre requisities
 
-- AWS VPC with:
-  - 2 or 3 Public Subnets (default route Internet Gateway), in different AZs
-  - 2 or 3 Private Subnets (default route NAT Gateway), in different AZs
-  - An ACM Public SSL Certificate for the Domain to be used.
-  - SES configured to be able to send from one validated email address
-
+- An AWS ACM Public SSL Certificate for the Domain to be used.
+- AWS SES configured to be able to send from one validated email address
 - [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
 - Docker Desktop (or Python 3.10 available locally)
 

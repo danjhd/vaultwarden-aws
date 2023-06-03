@@ -56,22 +56,27 @@ Parameters:
   Vpc:
     Type: AWS::EC2::VPC::Id
     Description: The VPC to use.
+    Default: ''
 
   PublicSubnetAz1:
     Type: AWS::EC2::Subnet::Id
     Description: The AZ1 Public Subnet for the Load Balancer.
+    Default: ''
 
   PrivateSubnetAz1:
     Type: AWS::EC2::Subnet::Id
     Description: The AZ1 Private Subnet for the ECS task and EFS
+    Default: ''
 
   PublicSubnetAz2:
     Type: AWS::EC2::Subnet::Id
     Description: The AZ2 Public Subnet for the Load Balancer.
+    Default: ''
 
   PrivateSubnetAz2:
     Type: AWS::EC2::Subnet::Id
     Description: The AZ2 Private Subnet for the ECS task and EFS
+    Default: ''
 
   PublicSubnetAz3:
     Type: AWS::EC2::Subnet::Id
@@ -111,15 +116,38 @@ Parameters:
     Description: (Optional) The CIDR to allow private HTTP access to ECS Tasks from.
     Default: ''
 
+Rules:
+
+  SubnetsInVpc:
+    Assertions:
+      - AssertDescription: All subnets must in the VPC
+        Assert:
+          'Fn::EachMemberEquals':
+            - 'Fn::ValueOfAll':
+                - AWS::EC2::Subnet::Id
+                - VpcId
+            - !Ref Vpc
+
 Conditions:
 
   CreateCluster: !Equals [!Ref ClusterName, '']
 
   AddPrivateAccess: !Not [!Equals [!Ref PrivateAccessCidr, '']]
 
-  PrivateAz3Supplied: !Not [!Equals [!Ref PrivateSubnetAz3, '']]
+  CreateVpc: !Or
+    - !Equals [!Ref Vpc, '']
+    - !Equals [!Ref PublicSubnetAz1, '']
+    - !Equals [!Ref PrivateSubnetAz1, '']
+    - !Equals [!Ref PublicSubnetAz2, '']
+    - !Equals [!Ref PrivateSubnetAz2, '']
 
-  PublicAz3Supplied: !Not [!Equals [!Ref PublicSubnetAz3, '']]
+  PrivateAz3Supplied: !And
+    - !Not [!Equals [!Ref PrivateSubnetAz3, '']]
+    - !Not [!Condition CreateVpc]
+
+  PublicAz3Supplied: !And
+    - !Not [!Equals [!Ref PublicSubnetAz3, '']]
+    - !Not [!Condition CreateVpc]
 
   LogDeliverySupported: !Not
     - !Or
@@ -204,6 +232,14 @@ Mappings:
       id: '797873946194'
 
 Resources:
+
+  VpcStack:
+    Condition: CreateVpc
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      TemplateURL: nested/vpc.yaml
 
   AdminToken:
     Type: AWS::SecretsManager::Secret
@@ -298,7 +334,10 @@ Resources:
             reason: All protocols desired for outbound traffic.
     Properties:
       GroupDescription: Access to the containers
-      VpcId: !Ref Vpc
+      VpcId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.VpcId
+        - !Ref Vpc
       SecurityGroupIngress: !If
         - AddPrivateAccess
         - - Description: Private Http Access
@@ -323,7 +362,10 @@ Resources:
             reason: All https traffic allowed.
     Properties:
       GroupDescription: Access to the load balancer
-      VpcId: !Ref Vpc
+      VpcId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.VpcId
+        - !Ref Vpc
       SecurityGroupIngress:
         - Description: https access
           CidrIp: 0.0.0.0/0
@@ -358,7 +400,10 @@ Resources:
             reason: All protocols desired for outbound traffic.
     Properties:
       GroupDescription: Access to EFS
-      VpcId: !Ref Vpc
+      VpcId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.VpcId
+        - !Ref Vpc
       SecurityGroupIngress:
         - Description: ECS EFS access
           SourceSecurityGroupId: !Ref SecurityGroupEcs
@@ -387,7 +432,10 @@ Resources:
     Type: AWS::EFS::MountTarget
     Properties:
       FileSystemId: !Ref FileSystem
-      SubnetId: !Ref PrivateSubnetAz1
+      SubnetId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz1
+        - !Ref PrivateSubnetAz1
       SecurityGroups:
         - !Ref SecurityGroupEfs
 
@@ -395,7 +443,10 @@ Resources:
     Type: AWS::EFS::MountTarget
     Properties:
       FileSystemId: !Ref FileSystem
-      SubnetId: !Ref PrivateSubnetAz2
+      SubnetId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz2
+        - !Ref PrivateSubnetAz2
       SecurityGroups:
         - !Ref SecurityGroupEfs
 
@@ -447,8 +498,14 @@ Resources:
       Scheme: internet-facing
       IpAddressType: ipv4
       Subnets:
-        - !Ref PublicSubnetAz1
-        - !Ref PublicSubnetAz2
+        - !If
+          - CreateVpc
+          - !GetAtt VpcStack.Outputs.PublicSubnetIdAz1
+          - !Ref PublicSubnetAz1
+        - !If
+          - CreateVpc
+          - !GetAtt VpcStack.Outputs.PublicSubnetIdAz2
+          - !Ref PublicSubnetAz2
         - !If
             - PublicAz3Supplied
             - !Ref PublicSubnetAz3
@@ -486,7 +543,10 @@ Resources:
       Protocol: HTTP
       Port: 80
       TargetType: ip
-      VpcId: !Ref Vpc
+      VpcId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.VpcId
+        - !Ref Vpc
       TargetGroupAttributes:
         - Key: deregistration_delay.timeout_seconds
           Value: '5'
@@ -617,8 +677,14 @@ Resources:
           SecurityGroups:
             - !Ref SecurityGroupEcs
           Subnets:
-            - !Ref PrivateSubnetAz1
-            - !Ref PrivateSubnetAz2
+            - !If
+              - CreateVpc
+              - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz1
+              - !Ref PrivateSubnetAz1
+            - !If
+              - CreateVpc
+              - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz2
+              - !Ref PrivateSubnetAz3
             - !If
                 - PrivateAz3Supplied
                 - !Ref PrivateSubnetAz3

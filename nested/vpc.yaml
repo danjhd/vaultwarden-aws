@@ -1,0 +1,73 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Transform: AWS::LanguageExtensions
+
+Resources:
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/22
+      Tags:
+        - Key: Name
+          Value: VaultWarden
+
+  Igw:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: VaultWarden
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref Igw
+
+  StackAz1:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      TemplateURL: az.yaml
+      Parameters:
+        AvailabilityZone: !Select 
+          - 0
+          - Fn::GetAZs: !Ref 'AWS::Region'
+        PublicSubnetCidr: 10.0.0.0/24
+        PrivateSubnetCidr: 10.0.1.0/24
+        VpcId: !Ref Vpc
+        IgwId: !Ref Igw
+
+  StackAz2:
+    Type: AWS::CloudFormation::Stack
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      TemplateURL: az.yaml
+      Parameters:
+        AvailabilityZone: !Select 
+          - 1
+          - Fn::GetAZs: !Ref 'AWS::Region'
+        PublicSubnetCidr: 10.0.2.0/24
+        PrivateSubnetCidr: 10.0.3.0/24
+        VpcId: !Ref Vpc
+        IgwId: !Ref Igw
+
+Outputs:
+
+  VpcId:
+    Value: !Ref Vpc
+
+  PublicSubnetIdAz1:
+    Value: !GetAtt StackAz1.Outputs.PublicSubnetId
+
+  PrivateSubnetIdAz1:
+    Value: !GetAtt StackAz1.Outputs.PrivateSubnetId
+
+  PublicSubnetIdAz2:
+    Value: !GetAtt StackAz2.Outputs.PublicSubnetId
+
+  PrivateSubnetIdAz2:
+    Value: !GetAtt StackAz2.Outputs.PrivateSubnetId
