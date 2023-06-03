@@ -4,8 +4,9 @@ import hmac
 import logging
 import os
 
-from crhelper import CfnResource
+import boto3
 from argon2 import PasswordHasher
+from crhelper import CfnResource
 
 logger = logging.getLogger(__name__)
 helper = CfnResource(json_logging=False, log_level="DEBUG", boto_level="CRITICAL")
@@ -22,9 +23,7 @@ def create(event, context):
     helper.Data["SmtpPassword"] = smtp_password(
         event["ResourceProperties"]["SecretAccessKey"]
     )
-    helper.Data["AdminToken"] = argon2_phc(
-        event["ResourceProperties"]["Token"]
-    )
+    helper.Data["AdminToken"] = argon2_phc(event["ResourceProperties"]["TokenSecretId"])
     return "Utility"
 
 
@@ -51,9 +50,11 @@ def sign(key, msg):
     return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
 
 
-def argon2_phc(token):
+def argon2_phc(secret_id):
+    sec = boto3.client("secretsmanager")
+    secret_value = sec.get_secret_value(SecretId=secret_id)
     ph = PasswordHasher(time_cost=2, memory_cost=19456, parallelism=1)
-    return ph.hash(token)
+    return ph.hash(secret_value["SecretString"])
 
 
 def handler(event, context):

@@ -158,6 +158,21 @@ Mappings:
 
 Resources:
 
+  AdminToken:
+    Type: AWS::SecretsManager::Secret
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W77
+            reason: Custom KMS Key not required.
+    Properties:
+      Description: This is the Admin Token required to access the VaultWarden Admin page.
+      GenerateSecretString:
+        PasswordLength: 32
+        ExcludePunctuation: True
+
   UtilityFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -173,6 +188,13 @@ Resources:
       MemorySize: 128
       Timeout: 3
       CodeUri: functions/utility-function
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !Ref AdminToken
 
   SmtpUser:
     Type: AWS::IAM::User
@@ -203,7 +225,7 @@ Resources:
     Properties:
       ServiceToken: !GetAtt UtilityFunction.Arn
       SecretAccessKey: !GetAtt SmtpAccessKey.SecretAccessKey
-      Token: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
+      TokenSecretId: !Ref AdminToken
 
   SmtpSecret:
     Type: AWS::SecretsManager::Secret
@@ -731,5 +753,5 @@ Outputs:
   LoadBalancerDNSName:
     Value: !GetAtt LoadBalancer.DNSName
   
-  AdminToken:
-    Value: !Select [2, !Split ['/', !Ref 'AWS::StackId']]
+  AdminTokenSecretId:
+    Value: !Ref AdminToken

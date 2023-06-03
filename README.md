@@ -42,9 +42,9 @@ Key                 LoadBalancerDNSName
 Description         -
 Value               xxxxxxxxxxxxxxxxxxxxxxxxx.elb.amazonaws.com
 
-Key                 AdminToken
+Key                 AdminTokenSecretId
 Description         -
-Value               Xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+Value               arn:aws:secretsmanager:XX-XXXX-X:XXXXXXXXXXXX:secret:AdminToken-XXXXXXXXXX
 ----------------------------------------------------------------------------------------------
 ```
 
@@ -58,5 +58,7 @@ https://{DOMAINNAME}
 The Admin Panel of VaultWarden is blocked by the WAF deliberately.
 
 Access can be gained at `http://{ecs task private IP}/admin`
+
+The Admin Token can be found in Secrets Manager, the Secret Arn is shown in the `AdminTokenSecretId` output.
 
 > **Note**: To gain access you will need to do so from a resource that has private IP access and update the ECS security group.
