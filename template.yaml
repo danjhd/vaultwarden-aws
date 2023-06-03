@@ -20,6 +20,7 @@ Metadata:
           - DomainName
           - EmailFrom
           - CertificateArn
+          - PrivateAccessCidr
     ParameterLabels:
       Vpc:
         default: Vpc
@@ -35,6 +36,8 @@ Metadata:
         default: Email From Address
       CertificateArn:
         default: SSL Certificate Arn
+      PrivateAccessCidr:
+        default: Private Access Cidr Range
 
 Parameters:
 
@@ -52,7 +55,7 @@ Parameters:
 
   ClusterName:
     Type: String
-    Description: The name of an existing ECS cluster (leave blank to create a new cluster).
+    Description: The name of an existing ECS cluster. (Leave blank to create a new cluster).
     Default: ''
 
   DomainName:
@@ -73,9 +76,16 @@ Parameters:
     Type: String
     Description: The Arn for the ACM certificate for the supplied Dns Name.
 
+  PrivateAccessCidr:
+    Type: String
+    Description: The CIDR to allow private HTTP access to ECS Tasks from. (Leave blank if not required).
+    Default: ''
+
 Conditions:
 
   CreateCluster: !Equals [!Ref ClusterName, '']
+
+  AddPrivateAccess: !Not [!Equals [!Ref PrivateAccessCidr, '']]
 
   LogDeliverySupported: !Not
     - !Or
@@ -255,6 +265,14 @@ Resources:
     Properties:
       GroupDescription: Access to the containers
       VpcId: !Ref Vpc
+      SecurityGroupIngress: !If
+        - AddPrivateAccess
+        - - Description: Private Http Access
+            CidrIp: !Ref PrivateAccessCidr
+            FromPort: 80
+            ToPort: 80
+            IpProtocol: tcp
+        - !Ref AWS::NoValue
       SecurityGroupEgress:
         - Description: All outbound
           CidrIp: 0.0.0.0/0
@@ -273,7 +291,7 @@ Resources:
       GroupDescription: Access to the load balancer
       VpcId: !Ref Vpc
       SecurityGroupIngress:
-        - Description: http access
+        - Description: https access
           CidrIp: 0.0.0.0/0
           FromPort: 443
           ToPort: 443
