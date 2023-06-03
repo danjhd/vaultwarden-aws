@@ -52,7 +52,8 @@ Parameters:
 
   ClusterName:
     Type: String
-    Description: The name of an existing ECS cluster.
+    Description: The name of an existing ECS cluster (leave blank to create a new cluster).
+    Default: ''
 
   DomainName:
     Type: String
@@ -73,6 +74,8 @@ Parameters:
     Description: The Arn for the ACM certificate for the supplied Dns Name.
 
 Conditions:
+
+  CreateCluster: !Equals [!Ref ClusterName, '']
 
   LogDeliverySupported: !Not
     - !Or
@@ -529,11 +532,31 @@ Resources:
             AuthorizationConfig:
               IAM: ENABLED
 
+  EcsCluster:
+    Condition: CreateCluster
+    Type: AWS::ECS::Cluster
+#    Properties:
+#      CapacityProviders: 
+#        - String
+#      ClusterSettings:
+#        - ClusterSettings
+#      Configuration:
+#        ClusterConfiguration
+#      DefaultCapacityProviderStrategy:
+#        - CapacityProviderStrategyItem
+#      ServiceConnectDefaults:
+#        ServiceConnectDefaults
+#      Tags:
+#        - Tag
+
   EcsService:
     Type: AWS::ECS::Service
     DependsOn: Listener
     Properties:
-      Cluster: !Ref ClusterName
+      Cluster: !If
+        - CreateCluster
+        - !Ref EcsCluster
+        - !Ref ClusterName
       TaskDefinition: !Ref EcsTaskDefinition
       LoadBalancers:
         - TargetGroupArn: !Ref TargetGroup
