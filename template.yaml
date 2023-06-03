@@ -20,7 +20,6 @@ Metadata:
           - DomainName
           - EmailFrom
           - CertificateArn
-          - AlbLogBucket
     ParameterLabels:
       Vpc:
         default: Vpc
@@ -36,8 +35,6 @@ Metadata:
         default: Email From Address
       CertificateArn:
         default: SSL Certificate Arn
-      AlbLogBucket:
-        default: Load Balancer Log Bucket
 
 Parameters:
 
@@ -75,9 +72,89 @@ Parameters:
     Type: String
     Description: The Arn for the ACM certificate for the supplied Dns Name.
 
-  AlbLogBucket:
-    Type: String
-    Description: The S3 Bucket to use for Load Balancer Access Logs.
+Conditions:
+
+  LogDeliverySupported: !Not
+    - !Or
+        - !Or
+          - !Equals [!Ref 'AWS::Region', 'af-south-1']
+          - !Equals [!Ref 'AWS::Region', 'ap-east-1']
+          - !Equals [!Ref 'AWS::Region', 'ap-northeast-1']
+          - !Equals [!Ref 'AWS::Region', 'ap-northeast-2']
+          - !Equals [!Ref 'AWS::Region', 'ap-northeast-3']
+          - !Equals [!Ref 'AWS::Region', 'ap-south-1']
+          - !Equals [!Ref 'AWS::Region', 'ap-southeast-1']
+          - !Equals [!Ref 'AWS::Region', 'ap-southeast-2']
+          - !Equals [!Ref 'AWS::Region', 'ap-southeast-3']
+          - !Equals [!Ref 'AWS::Region', 'ca-central-1']
+        - !Or
+          - !Equals [!Ref 'AWS::Region', 'eu-central-1']
+          - !Equals [!Ref 'AWS::Region', 'eu-north-1']
+          - !Equals [!Ref 'AWS::Region', 'eu-south-1']
+          - !Equals [!Ref 'AWS::Region', 'eu-west-1']
+          - !Equals [!Ref 'AWS::Region', 'eu-west-2']
+          - !Equals [!Ref 'AWS::Region', 'eu-west-3']
+          - !Equals [!Ref 'AWS::Region', 'me-south-1']
+          - !Equals [!Ref 'AWS::Region', 'sa-east-1']
+          - !Equals [!Ref 'AWS::Region', 'us-east-1']
+          - !Equals [!Ref 'AWS::Region', 'us-east-2']
+        - !Or
+          - !Equals [!Ref 'AWS::Region', 'us-gov-east-1']
+          - !Equals [!Ref 'AWS::Region', 'us-gov-west-1']
+          - !Equals [!Ref 'AWS::Region', 'us-west-1']
+          - !Equals [!Ref 'AWS::Region', 'us-west-2']
+
+Mappings:
+
+  LoggingAccount:
+    af-south-1:
+      id: '098369216593'
+    ap-east-1:
+      id: '754344448648'
+    ap-northeast-1:
+      id: '582318560864'
+    ap-northeast-2:
+      id: '600734575887'
+    ap-northeast-3:
+      id: '383597477331'
+    ap-south-1:
+      id: '718504428378'
+    ap-southeast-1:
+      id: '114774131450'
+    ap-southeast-2:
+      id: '783225319266'
+    ap-southeast-3:
+      id: '589379963580'
+    ca-central-1:
+      id: '985666609251'
+    eu-central-1:
+      id: '054676820928'
+    eu-north-1:
+      id: '897822967062'
+    eu-south-1:
+      id: '635631232127'
+    eu-west-1:
+      id: '156460612806'
+    eu-west-2:
+      id: '652711504416'
+    eu-west-3:
+      id: '009996457667'
+    me-south-1:
+      id: '076674570225'
+    sa-east-1:
+      id: '507241528517'
+    us-east-1:
+      id: '127311923021'
+    us-east-2:
+      id: '	033677994240'
+    us-gov-east-1:
+      id: '190560391635'
+    us-gov-west-1:
+      id: '048591011584'
+    us-west-1:
+      id: '027434742980'
+    us-west-2:
+      id: '797873946194'
 
 Resources:
 
@@ -143,13 +220,6 @@ Resources:
 
   SecurityGroupEcs:
     Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Access to the containers
-      VpcId: !Ref Vpc
-      SecurityGroupEgress:
-        - Description: All outbound
-          CidrIp: 0.0.0.0/0
-          IpProtocol: '-1'
     Metadata:
       cfn_nag:
         rules_to_suppress:
@@ -157,9 +227,23 @@ Resources:
             reason: All protocols desired for outbound traffic.
           - id: W40
             reason: All protocols desired for outbound traffic.
+    Properties:
+      GroupDescription: Access to the containers
+      VpcId: !Ref Vpc
+      SecurityGroupEgress:
+        - Description: All outbound
+          CidrIp: 0.0.0.0/0
+          IpProtocol: '-1'
 
   SecurityGroupAlb:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W2
+            reason: All https traffic allowed.
+          - id: W9
+            reason: All https traffic allowed.
     Properties:
       GroupDescription: Access to the load balancer
       VpcId: !Ref Vpc
@@ -175,13 +259,6 @@ Resources:
           IpProtocol: tcp
           FromPort: 80
           ToPort: 80
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W2
-            reason: All https traffic allowed.
-          - id: W9
-            reason: All https traffic allowed.
 
   SecurityGroupEcsIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -195,6 +272,13 @@ Resources:
 
   SecurityGroupEfs:
     Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: All protocols desired for outbound traffic.
+          - id: W40
+            reason: All protocols desired for outbound traffic.
     Properties:
       GroupDescription: Access to EFS
       VpcId: !Ref Vpc
@@ -208,13 +292,6 @@ Resources:
         - Description: All outbound
           CidrIp: 0.0.0.0/0
           IpProtocol: '-1'
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: W5
-            reason: All protocols desired for outbound traffic.
-          - id: W40
-            reason: All protocols desired for outbound traffic.
 
   FileSystem:
     Type: AWS::EFS::FileSystem
@@ -253,7 +330,39 @@ Resources:
       SecurityGroups:
         - !Ref SecurityGroupEfs
 
+  LogBucket:
+    Type: AWS::S3::Bucket
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Access logging not required.
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: True
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  LogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties: 
+      Bucket: !Ref LogBucket
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action: s3:PutObject
+            Principal: !If
+              - LogDeliverySupported
+              - Service: logdelivery.elasticloadbalancing.amazonaws.com
+              - AWS: !Sub
+                  - 'arn:aws:iam::${LogAccountId}:root'
+                  - LogAccountId: !FindInMap [LoggingAccount, !Ref 'AWS::Region', id]
+            Resource: !Sub '${LogBucket.Arn}/vaultwarden-alb/AWSLogs/${AWS::AccountId}/*'
+
   LoadBalancer:
+    DependsOn: LogBucketPolicy
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       Type: application
@@ -268,7 +377,7 @@ Resources:
         - Key: access_logs.s3.enabled
           Value: True
         - Key: access_logs.s3.bucket
-          Value: !Ref AlbLogBucket
+          Value: !Ref LogBucket
         - Key: access_logs.s3.prefix
           Value: vaultwarden-alb
 
@@ -429,6 +538,13 @@ Resources:
 
   EcsTaskRole:
     Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F3
+            reason: Specific permision not possible.
+          - id: W11
+            reason: Resource level policy not possible.
     Properties:
       Description: The ECS Execution IAM Role
       AssumeRolePolicyDocument:
@@ -458,13 +574,6 @@ Resources:
                   - ssmmessages:OpenControlChannel
                   - ssmmessages:OpenDataChannel
                 Resource: '*'
-    Metadata:
-      cfn_nag:
-        rules_to_suppress:
-          - id: F3
-            reason: Specific permision not possible.
-          - id: W11
-            reason: Resource level policy not possible.
 
   Waf:
     Type: AWS::WAFv2::WebACL
