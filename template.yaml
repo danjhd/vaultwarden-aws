@@ -8,15 +8,19 @@ Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
-          default: Deployment
+          default: Deployment (Leave all fields blank to create a new VPC)
         Parameters:
           - Vpc
-          - PublicSubnets
-          - PrivateSubnets
-          - ClusterName
+          - PublicSubnetAz1
+          - PrivateSubnetAz1
+          - PublicSubnetAz2
+          - PrivateSubnetAz2
+          - PublicSubnetAz3
+          - PrivateSubnetAz3
       - Label:
-          default: Configuration
+          default: Deployment
         Parameters:
+          - ClusterName
           - DomainName
           - EmailFrom
           - CertificateArn
@@ -24,10 +28,18 @@ Metadata:
     ParameterLabels:
       Vpc:
         default: Vpc
-      PublicSubnets:
-        default: Public Subnets
-      PrivateSubnets:
-        default: Private Subnets
+      PublicSubnetAz1:
+        default: Public Subnet - AZ1
+      PrivateSubnetAz1:
+        default: Private Subnet - AZ1
+      PublicSubnetAz2:
+        default: Public Subnet - AZ2
+      PrivateSubnetAz2:
+        default: Private Subnet - AZ2
+      PublicSubnetAz3:
+        default: Public Subnet - AZ3
+      PrivateSubnetAz3:
+        default: Private Subnet - AZ3
       ClusterName:
         default: ECS Cluster Name
       DomainName:
@@ -45,17 +57,35 @@ Parameters:
     Type: AWS::EC2::VPC::Id
     Description: The VPC to use.
 
-  PublicSubnets:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: The Public Subnets for the Load Balancer.
+  PublicSubnetAz1:
+    Type: AWS::EC2::Subnet::Id
+    Description: The AZ1 Public Subnet for the Load Balancer.
 
-  PrivateSubnets:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description: The Private Subnets for the ECS task and EFS
+  PrivateSubnetAz1:
+    Type: AWS::EC2::Subnet::Id
+    Description: The AZ1 Private Subnet for the ECS task and EFS
+
+  PublicSubnetAz2:
+    Type: AWS::EC2::Subnet::Id
+    Description: The AZ2 Public Subnet for the Load Balancer.
+
+  PrivateSubnetAz2:
+    Type: AWS::EC2::Subnet::Id
+    Description: The AZ2 Private Subnet for the ECS task and EFS
+
+  PublicSubnetAz3:
+    Type: AWS::EC2::Subnet::Id
+    Description: (Optional) The AZ3 Public Subnet for the Load Balancer.
+    Default: ''
+
+  PrivateSubnetAz3:
+    Type: AWS::EC2::Subnet::Id
+    Description: (Optional) The AZ3 Private Subnet for the ECS task and EFS
+    Default: ''
 
   ClusterName:
     Type: String
-    Description: The name of an existing ECS cluster. (Leave blank to create a new cluster).
+    Description: (Optional) The name of an existing ECS cluster. (Leave blank to create a new cluster).
     Default: ''
 
   DomainName:
@@ -78,7 +108,7 @@ Parameters:
 
   PrivateAccessCidr:
     Type: String
-    Description: The CIDR to allow private HTTP access to ECS Tasks from. (Leave blank if not required).
+    Description: (Optional) The CIDR to allow private HTTP access to ECS Tasks from.
     Default: ''
 
 Conditions:
@@ -86,6 +116,10 @@ Conditions:
   CreateCluster: !Equals [!Ref ClusterName, '']
 
   AddPrivateAccess: !Not [!Equals [!Ref PrivateAccessCidr, '']]
+
+  PrivateAz3Supplied: !Not [!Equals [!Ref PrivateSubnetAz3, '']]
+
+  PublicAz3Supplied: !Not [!Equals [!Ref PublicSubnetAz3, '']]
 
   LogDeliverySupported: !Not
     - !Or
@@ -353,7 +387,7 @@ Resources:
     Type: AWS::EFS::MountTarget
     Properties:
       FileSystemId: !Ref FileSystem
-      SubnetId: !Select [0, !Ref PrivateSubnets]
+      SubnetId: !Ref PrivateSubnetAz1
       SecurityGroups:
         - !Ref SecurityGroupEfs
 
@@ -361,15 +395,16 @@ Resources:
     Type: AWS::EFS::MountTarget
     Properties:
       FileSystemId: !Ref FileSystem
-      SubnetId: !Select [1, !Ref PrivateSubnets]
+      SubnetId: !Ref PrivateSubnetAz2
       SecurityGroups:
         - !Ref SecurityGroupEfs
 
   MountTarget2:
+    Condition: PrivateAz3Supplied
     Type: AWS::EFS::MountTarget
     Properties:
       FileSystemId: !Ref FileSystem
-      SubnetId: !Select [2, !Ref PrivateSubnets]
+      SubnetId: !Ref PrivateSubnetAz3
       SecurityGroups:
         - !Ref SecurityGroupEfs
 
@@ -411,7 +446,13 @@ Resources:
       Type: application
       Scheme: internet-facing
       IpAddressType: ipv4
-      Subnets: !Ref PublicSubnets
+      Subnets:
+        - !Ref PublicSubnetAz1
+        - !Ref PublicSubnetAz2
+        - !If
+            - PublicAz3Supplied
+            - !Ref PublicSubnetAz3
+            - !Ref AWS::NoValue
       SecurityGroups:
         - !Ref SecurityGroupAlb
       LoadBalancerAttributes:
@@ -553,19 +594,6 @@ Resources:
   EcsCluster:
     Condition: CreateCluster
     Type: AWS::ECS::Cluster
-#    Properties:
-#      CapacityProviders: 
-#        - String
-#      ClusterSettings:
-#        - ClusterSettings
-#      Configuration:
-#        ClusterConfiguration
-#      DefaultCapacityProviderStrategy:
-#        - CapacityProviderStrategyItem
-#      ServiceConnectDefaults:
-#        ServiceConnectDefaults
-#      Tags:
-#        - Tag
 
   EcsService:
     Type: AWS::ECS::Service
@@ -588,7 +616,13 @@ Resources:
           AssignPublicIp: DISABLED
           SecurityGroups:
             - !Ref SecurityGroupEcs
-          Subnets: !Ref PrivateSubnets
+          Subnets:
+            - !Ref PrivateSubnetAz1
+            - !Ref PrivateSubnetAz2
+            - !If
+                - PrivateAz3Supplied
+                - !Ref PrivateSubnetAz3
+                - !Ref AWS::NoValue
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
