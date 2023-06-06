@@ -19,13 +19,13 @@ Parameters:
 
 Resources:
 
-  # Eip:
-  #   Type: AWS::EC2::EIP
-  #   Properties:
-  #     Domain: vpc
-  #     Tags:
-  #       - Key: Name
-  #         Value: !Sub VaultWarden/Eip/${AvailabilityZone}
+  Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub VaultWarden/Eip/${AvailabilityZone}
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
@@ -66,14 +66,14 @@ Resources:
       SubnetId: !Ref PublicSubnet
       RouteTableId: !Ref PublicRouteTable
 
-  # NatGw:
-  #   Type: AWS::EC2::NatGateway
-  #   Properties:
-  #     SubnetId: !Ref PublicSubnet
-  #     AllocationId: !GetAtt Eip.AllocationId
-  #     Tags:
-  #       - Key: Name
-  #         Value: !Sub VaultWarden/NatGw/${AvailabilityZone}
+  NatGw:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      AllocationId: !GetAtt Eip.AllocationId
+      Tags:
+        - Key: Name
+          Value: !Sub VaultWarden/NatGw/${AvailabilityZone}
 
   PrivateSubnet:
     Type: AWS::EC2::Subnet
@@ -101,8 +101,7 @@ Resources:
     Properties:
       RouteTableId: !Ref PrivateRouteTable
       DestinationCidrBlock: 0.0.0.0/0
-      GatewayId: !Ref IgwId
-#      NatGatewayId: !Ref NatGw
+      NatGatewayId: !Ref NatGw
 
   SubnetRouteTableAssociationPrivate:
     Type: AWS::EC2::SubnetRouteTableAssociation
