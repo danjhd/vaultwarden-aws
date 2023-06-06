@@ -54,37 +54,37 @@ Metadata:
 Parameters:
 
   Vpc:
-    Type: AWS::EC2::VPC::Id
+    Type: String
     Description: The VPC to use.
     Default: ''
 
   PublicSubnetAz1:
-    Type: AWS::EC2::Subnet::Id
+    Type: String
     Description: The AZ1 Public Subnet for the Load Balancer.
     Default: ''
 
   PrivateSubnetAz1:
-    Type: AWS::EC2::Subnet::Id
+    Type: String
     Description: The AZ1 Private Subnet for the ECS task and EFS
     Default: ''
 
   PublicSubnetAz2:
-    Type: AWS::EC2::Subnet::Id
+    Type: String
     Description: The AZ2 Public Subnet for the Load Balancer.
     Default: ''
 
   PrivateSubnetAz2:
-    Type: AWS::EC2::Subnet::Id
+    Type: String
     Description: The AZ2 Private Subnet for the ECS task and EFS
     Default: ''
 
   PublicSubnetAz3:
-    Type: AWS::EC2::Subnet::Id
+    Type: String
     Description: (Optional) The AZ3 Public Subnet for the Load Balancer.
     Default: ''
 
   PrivateSubnetAz3:
-    Type: AWS::EC2::Subnet::Id
+    Type: String
     Description: (Optional) The AZ3 Private Subnet for the ECS task and EFS
     Default: ''
 
@@ -115,18 +115,6 @@ Parameters:
     Type: String
     Description: (Optional) The CIDR to allow private HTTP access to ECS Tasks from.
     Default: ''
-
-Rules:
-
-  SubnetsInVpc:
-    Assertions:
-      - AssertDescription: All subnets must in the VPC
-        Assert:
-          'Fn::EachMemberEquals':
-            - 'Fn::ValueOfAll':
-                - AWS::EC2::Subnet::Id
-                - VpcId
-            - !Ref Vpc
 
 Conditions:
 
