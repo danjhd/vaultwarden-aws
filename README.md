@@ -13,7 +13,6 @@ This solution deploys the [VaultWarden](https://github.com/dani-garcia/vaultward
 ## Deployment
 
 ```bash
-pip install -r ./functions/utility-function/requirements.txt -t ./functions/utility-function/
 aws cloudformation package --template-file template.yaml --s3-bucket {YOUR S3 BUCKET} --output-template-file packaged-template.yaml
 ```
 

@@ -1,6 +1,3 @@
 .aws-sam
 .venv
-functions/*
-!functions/*/app.py
-!functions/*/requiremwnts.py
 packaged-template.yaml
