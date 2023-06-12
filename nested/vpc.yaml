@@ -7,6 +7,7 @@ Resources:
   Vpc:
     Type: AWS::EC2::VPC
     Properties:
+      EnableDnsHostnames: True
       CidrBlock: 10.0.0.0/22
       Tags:
         - Key: Name
