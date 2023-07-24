@@ -846,20 +846,8 @@ Resources:
             ManagedRuleGroupStatement:
               VendorName: AWS
               Name: AWSManagedRulesUnixRuleSet
-        - Name: AWSManagedRulesWindowsRuleSet
-          Priority: 9
-          OverrideAction:
-            None: {}
-          VisibilityConfig:
-            SampledRequestsEnabled: True
-            CloudWatchMetricsEnabled: True
-            MetricName: AWSManagedRulesWindowsRuleSet
-          Statement:
-            ManagedRuleGroupStatement:
-              VendorName: AWS
-              Name: AWSManagedRulesWindowsRuleSet
         - Name: AWSManagedRulesWordPressRuleSet
-          Priority: 10
+          Priority: 9
           OverrideAction:
             None: {}
           VisibilityConfig:
