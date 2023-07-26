@@ -865,6 +865,32 @@ Resources:
       ResourceArn: !Ref LoadBalancer
       WebACLArn: !GetAtt Waf.Arn
 
+  WafLogGroup:
+    Type: AWS::Logs::LogGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: Custom KMS Key not required.
+    Properties: 
+      LogGroupName: aws-waf-logs-vaultwarden
+      RetentionInDays: 30
+
+  WafLoggingConfiguration:
+    Type: AWS::WAFv2::LoggingConfiguration
+    Properties: 
+      ResourceArn: !GetAtt Waf.Arn
+      LogDestinationConfigs: 
+        - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:${WafLogGroup}
+      LoggingFilter:
+        DefaultBehavior: DROP
+        Filters:
+          - Behavior: KEEP
+            Requirement: MEETS_ALL 
+            Conditions:
+              - ActionCondition:
+                  Action: BLOCK
+
 Outputs:
 
   LoadBalancerDNSName:
