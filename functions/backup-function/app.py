@@ -10,7 +10,7 @@ from botocore.exceptions import ClientError
 def lambda_handler(event, context):
     timestr = time.strftime("%Y%m%d-%H%M%S")
     shutil.make_archive(f'/tmp/{timestr}', 'zip', '/mnt/efs')
-    upload_file(f"/tmp/{timestr}.zip", f"{os.environ['BackupBucket']}")
+    upload_file(f"/tmp/{timestr}.zip", f"{os.environ['BACKUP_BUCKET']}")
     return None
 
 
