@@ -41,3 +41,26 @@ Access can be gained at `http://{ecs task private IP}/admin`
 The Admin Token can be found in Secrets Manager, the Secret Arn is shown in the `AdminTokenSecretId` output.
 
 > **Note**: To gain access you will need to do so from a resource that has private IP access and update the ECS security group.
+
+### Optional backup module
+
+An optional backup module can be deployed, a lambda function is scheduled and triggered daily , zips the content of the EFS mount point and writes it to a given S3 location.
+A S3 bucket policy needs to be manually created following the bellow example:
+
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "Replace with value obtained from Cfn Output RoleArnForBackupBucketPolicy"
+            },
+            "Action": [
+                "s3:GetObject",
+                "s3:PutObject",
+                "s3:PutObjectAcl"
+            ],
+            "Resource": "arn:aws:s3:::your-bucket-name/*"
+        }
+    ]
+}
