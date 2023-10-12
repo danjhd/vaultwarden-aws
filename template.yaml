@@ -25,6 +25,7 @@ Metadata:
           - EmailFrom
           - CertificateArn
           - PrivateAccessCidr
+          - Backup
     ParameterLabels:
       Vpc:
         default: Vpc
@@ -50,6 +51,8 @@ Metadata:
         default: SSL Certificate Arn
       PrivateAccessCidr:
         default: Private Access Cidr Range
+      Backup:
+        default: Provide an existing S3 bucket target to enable EFS to S3 daily backups
 
 Parameters:
 
@@ -116,7 +119,15 @@ Parameters:
     Description: (Optional) The CIDR to allow private HTTP access to ECS Tasks from.
     Default: ''
 
+  Backup: 
+    Type: String
+    Description: (Optional) The name of a S3 bucket to enable daily backups of the secrets database from EFS to S3.
+    Default: ''
+
+
 Conditions:
+
+  EnableBackup: !Not [!Equals [!Ref  Backup, '']]
 
   CreateCluster: !Equals [!Ref ClusterName, '']
 
@@ -166,6 +177,7 @@ Conditions:
           - !Equals [!Ref 'AWS::Region', 'us-gov-west-1']
           - !Equals [!Ref 'AWS::Region', 'us-west-1']
           - !Equals [!Ref 'AWS::Region', 'us-west-2']
+
 
 Mappings:
 
@@ -339,6 +351,27 @@ Resources:
           CidrIp: 0.0.0.0/0
           IpProtocol: '-1'
 
+  SecurityGroupLambdaBackup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: EnableBackup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: All protocols desired for outbound traffic.
+          - id: W40
+            reason: All protocols desired for outbound traffic.
+    Properties:
+      GroupDescription: Lambda Security Group to be referenced in EFS Sec Group
+      VpcId: !If
+        - CreateVpc
+        - !GetAtt VpcStack.Outputs.VpcId
+        - !Ref Vpc
+      SecurityGroupEgress:
+        - Description: All outbound
+          CidrIp: 0.0.0.0/0
+          IpProtocol: '-1'
+
   SecurityGroupAlb:
     Type: AWS::EC2::SecurityGroup
     Metadata:
@@ -403,6 +436,17 @@ Resources:
           CidrIp: 0.0.0.0/0
           IpProtocol: '-1'
 
+  SecurityGroupEFSIngressLambda:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: EnableBackup
+    Properties:
+      GroupId: !Ref SecurityGroupEfs
+      Description: Lambda EFS Access
+      SourceSecurityGroupId: !Ref SecurityGroupLambdaBackup
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+
   FileSystem:
     Type: AWS::EFS::FileSystem
     UpdateReplacePolicy: Retain
@@ -446,6 +490,12 @@ Resources:
       SubnetId: !Ref PrivateSubnetAz3
       SecurityGroups:
         - !Ref SecurityGroupEfs
+
+  LambdaEFSAccessPoint:
+    Condition: EnableBackup
+    Type: AWS::EFS::AccessPoint
+    Properties: 
+      FileSystemId: !Ref FileSystem
 
   LogBucket:
     Type: AWS::S3::Bucket
@@ -891,6 +941,53 @@ Resources:
               - ActionCondition:
                   Action: BLOCK
 
+  BackupFunction:
+    Condition: EnableBackup
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W89
+            reason: VPC not required.
+          - id: W92
+            reason: ReservedConcurrentExecutions not required.
+    Properties:
+      Runtime: python3.10
+      Handler: app.lambda_handler
+      MemorySize: 128
+      Timeout: 30
+      CodeUri: functions/backup-function
+      Events:
+        CWSchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: 'rate(1 day)'
+      Policies: 
+        S3WritePolicy:
+          BucketName: !Ref Backup
+      Environment:
+        Variables:
+          BackupBucket: !Ref Backup
+      FileSystemConfigs:
+        - Arn: !GetAtt LambdaEFSAccessPoint.Arn
+          LocalMountPath: /mnt/efs
+      VpcConfig:
+        SecurityGroupIds: 
+          - !Ref SecurityGroupLambdaBackup
+        SubnetIds: 
+          - !If
+            - CreateVpc
+            - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz1
+            - !Ref PrivateSubnetAz1
+          - !If
+            - CreateVpc
+            - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz2
+            - !Ref PrivateSubnetAz3
+          - !If
+              - PrivateAz3Supplied
+              - !Ref PrivateSubnetAz3
+              - !Ref AWS::NoValue
+
 Outputs:
 
   LoadBalancerDNSName:
@@ -898,3 +995,7 @@ Outputs:
   
   AdminTokenSecretId:
     Value: !Ref AdminToken
+
+  RoleArnForBackupBucketPolicy:
+    Condition: EnableBackup
+    Value: !GetAtt BackupFunctionRole.Arn
