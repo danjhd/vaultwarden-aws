@@ -25,7 +25,8 @@ Metadata:
           - EmailFrom
           - CertificateArn
           - PrivateAccessCidr
-          - Backup
+          - BackupBucket
+          - BackupPrefix
     ParameterLabels:
       Vpc:
         default: Vpc
@@ -51,8 +52,10 @@ Metadata:
         default: SSL Certificate Arn
       PrivateAccessCidr:
         default: Private Access Cidr Range
-      Backup:
+      BackupBucket:
         default: Provide an existing S3 bucket target to enable EFS to S3 daily backups
+      BackupPrefix:
+        default: Provide a prefix to use for S3 daily backups
 
 Parameters:
 
@@ -119,15 +122,19 @@ Parameters:
     Description: (Optional) The CIDR to allow private HTTP access to ECS Tasks from.
     Default: ''
 
-  Backup: 
+  BackupBucket:
     Type: String
     Description: (Optional) The name of a S3 bucket to enable daily backups of the secrets database from EFS to S3.
     Default: ''
 
+  BackupPrefix:
+    Type: String
+    Description: The prefix to use when saving daily backups to S3.
+    Default: 'backups'
 
 Conditions:
 
-  EnableBackup: !Not [!Equals [!Ref  Backup, '']]
+  EnableBackup: !Not [!Equals [!Ref  BackupBucket, '']]
 
   CreateCluster: !Equals [!Ref ClusterName, '']
 
@@ -266,7 +273,7 @@ Resources:
           - id: W92
             reason: ReservedConcurrentExecutions not required.
     Properties:
-      Runtime: python3.10
+      Runtime: python3.11
       Handler: app.handler
       MemorySize: 128
       Timeout: 3
@@ -368,9 +375,16 @@ Resources:
         - !GetAtt VpcStack.Outputs.VpcId
         - !Ref Vpc
       SecurityGroupEgress:
-        - Description: All outbound
+        - Description: Access to EFS
+          DestinationSecurityGroupId: !Ref SecurityGroupEfs
+          IpProtocol: tcp
+          FromPort: 2049
+          ToPort: 2049
+        - Description: S3 write access
           CidrIp: 0.0.0.0/0
-          IpProtocol: '-1'
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
 
   SecurityGroupAlb:
     Type: AWS::EC2::SecurityGroup
@@ -952,8 +966,8 @@ Resources:
           - id: W92
             reason: ReservedConcurrentExecutions not required.
     Properties:
-      Runtime: python3.10
-      Handler: app.lambda_handler
+      Runtime: python3.11
+      Handler: app.handler
       MemorySize: 128
       Timeout: 30
       CodeUri: functions/backup-function
@@ -963,11 +977,16 @@ Resources:
           Properties:
             ScheduleExpression: 'rate(1 day)'
       Policies: 
-        S3WritePolicy:
-          BucketName: !Ref Backup
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource: !Sub arn:${AWS::Partition}:s3:::${BackupBucket}/${BackupPrefix}/*
       Environment:
         Variables:
-          BackupBucket: !Ref Backup
+          BACKUP_BUCKET: !Ref BackupBucket
+          BACKUP_PREFIX: !Ref BackupPrefix
       FileSystemConfigs:
         - Arn: !GetAtt LambdaEFSAccessPoint.Arn
           LocalMountPath: /mnt/efs
@@ -982,7 +1001,7 @@ Resources:
           - !If
             - CreateVpc
             - !GetAtt VpcStack.Outputs.PrivateSubnetIdAz2
-            - !Ref PrivateSubnetAz3
+            - !Ref PrivateSubnetAz2
           - !If
               - PrivateAz3Supplied
               - !Ref PrivateSubnetAz3
